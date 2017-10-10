@@ -77,13 +77,13 @@ int T1plusPin = A1;     // select the differential high pin for T1
 int T2Pin = A2;         // select ground referenced analogue T2 pin
 int T3Pin = A3;         // select ground referenced analogue T3 pin
 int PumpPin = 2;        // Digital input pin for AC mains detection module for circulation pump
-int HeaterPin = 3;      // Digital input pin for AC mains detection module for heater element
+int HeatPin = 3;      // Digital input pin for AC mains detection module for heater element
 
 int T1Value = 0;
 int T2Value = 0;
 int T3Value = 0;
 bool PumpFlag = false;
-bool HeaterFlag = false;
+bool HeatFlag = false;
 
 float T1Temp = 0.0;
 float T2Temp = 0.0;
@@ -110,7 +110,16 @@ void setup() {
 #endif
   rtc.begin();
 
-  //Set RTC if not already running
+  //Set RTC if not already running.
+  //  For this horrible kludge to work, you need to first invalidate the RTC
+  //  by removing the battery and then re-inserting it.  Compile and immediately
+  //   upload the script.  The __DATE__ and __TIME__ parameters (set to the script
+  //   compilation time) will then be used to re-set the RTC.
+  //
+  // Success will be signalled in debug mode by the serial console proclaiming
+  //  "RTC is NOT running!", followed by the almost correct time being displayed
+  //  on the LCD.
+  
   if (! rtc.isrunning()) {
     
 #ifdef DEBUG
@@ -124,14 +133,14 @@ void setup() {
   // Set input pins for pump and heater sensors.
   // If not using external pullup resistors, then use "INPUT_PULLUP" instead
   pinMode(PumpPin, INPUT);
-  pinMode(HeaterPin, INPUT);
+  pinMode(HeatPin, INPUT);
   
 
   lcd.begin(16,2);
   // Temporary code to draw relay and temp state for layout testing           
   lcd.setBacklight(backlightStatus);
-  lcd.setCursor (8,0);   
-  lcd.print(" P:0 H:0");
+//  lcd.setCursor (8,0);   
+//  lcd.print(" P:0 H:0");
 
   // we'll use the initialization code from the utility libraries
   // since we're just testing if the card is working!
@@ -168,7 +177,7 @@ void loop(void) {
       T2Value = analogRead(T2Pin);
       T3Value = analogRead(T3Pin);
       PumpFlag = digitalRead(PumpPin);
-      HeaterFlag = digitalRead(HeaterPin);
+      HeatFlag = digitalRead(HeatPin);
 
       // Convert analog read sensor values to temperatures:
       T1Temp = (T1A * (T1Value * (5.0 / 1024.0 ))) + T1B;
@@ -180,14 +189,21 @@ void loop(void) {
       Serial.print(now.format(buf));
       Serial.print(T1Temp); Serial.print(" ");
       Serial.print(T2Temp); Serial.print(" ");
-      Serial.println(T3Temp);
+      Serial.print(T3Temp); Serial.print(" ");
+      Serial.print(PumpFlag); Serial.print(" ");
+      Serial.println(HeatFlag);
+      
 #endif
 
       lcd.setCursor ( 0, 0 );        
       strncpy(buf,"hh:mm:ss\0",50);
       lcd.print(now.format(buf));
-      lcd.setCursor( 0, 1 );
-      lcd.print("                ");
+      if (PumpFlag) {
+        lcd.print(" P:0");
+        } else lcd.print(" P:1");
+      if (HeatFlag) {
+        lcd.print(" H:0");
+        } else lcd.print(" H:1");
       lcd.setCursor( 0, 1 );
       dtostrf(T1Temp, 6, 2, buf);
       lcd.print(buf);
