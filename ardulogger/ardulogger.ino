@@ -91,6 +91,9 @@ float T3Temp = 0.0;
 
 
 char buf[50]; // buffer for print format string
+char TimeStamp[18]; // buffer for current timestamp string
+
+String LogEntry = ""; // Log entry string for serial and SD output
 
 
 void setup() {
@@ -135,33 +138,22 @@ void setup() {
   pinMode(PumpPin, INPUT);
   pinMode(HeatPin, INPUT);
   
-
+  // Initialise LCD display area and set backlight
   lcd.begin(16,2);
-  // Temporary code to draw relay and temp state for layout testing           
   lcd.setBacklight(backlightStatus);
-//  lcd.setCursor (8,0);   
-//  lcd.print(" P:0 H:0");
 
-  // we'll use the initialization code from the utility libraries
-  // since we're just testing if the card is working!
-  if (!card.init(SPI_HALF_SPEED, SDchipSelect)) {
+  // Intialise SD card.  See if the card is present and can be initialized:
+  if (!SD.begin(SDchipSelect)) {
 #ifdef DEBUG
-    Serial.println("?SD card initialization failed");
+    Serial.println("Card failed, or not present");
 #endif
-return;
-  } else {
-#ifdef DEBUG
-    Serial.println("SD card initialised");
-#endif
+    // don't do anything more:
+    return;
   }
-
-  // Check SD card for valid partition
-  if (!volume.init(card)) {
 #ifdef DEBUG
-    Serial.println("?SD card FAT partition not found");
+  Serial.println("card initialized.");
 #endif
-  return;
-  }
+  
     
 }
 
@@ -172,6 +164,11 @@ void loop(void) {
 
     if (!(lastSecond == thisSecond)) { // Scan inputs and update display once a second
       lastSecond = thisSecond;
+
+      // Read current timestamp
+      strncpy(buf,"YYYYMMDD hhmmss \0",50);
+      strncpy(TimeStamp, now.format(buf), 18);
+
       // read the sensor values:
       T1Value = analogRead(T1plusPin) - analogRead(T1minusPin);
       T2Value = analogRead(T2Pin);
@@ -179,22 +176,16 @@ void loop(void) {
       PumpFlag = digitalRead(PumpPin);
       HeatFlag = digitalRead(HeatPin);
 
-      // Convert analog read sensor values to temperatures:
+      // Convert analog input sensor value to temperature using linear equation constants:
       T1Temp = (T1A * (T1Value * (5.0 / 1024.0 ))) + T1B;
       T2Temp = (T2A * (T2Value * (5.0 / 1024.0 ))) + T2B;
       T3Temp = (T3A * (T3Value * (5.0 / 1024.0 ))) + T3B;
-      
-#ifdef DEBUG
-      strncpy(buf,"YYYYMMDD hhmmss \0",50);
-      Serial.print(now.format(buf));
-      Serial.print(T1Temp); Serial.print(" ");
-      Serial.print(T2Temp); Serial.print(" ");
-      Serial.print(T3Temp); Serial.print(" ");
-      Serial.print(PumpFlag); Serial.print(" ");
-      Serial.println(HeatFlag);
-      
-#endif
 
+      // Pack log entry into string
+      LogEntry = TimeStamp + String(T1Temp) + String(T2Temp) + String(T3Temp)
+                + " " + String(PumpFlag) + " " + String(HeatFlag);
+
+      // Format data for LCD and display it
       lcd.setCursor ( 0, 0 );        
       strncpy(buf,"hh:mm:ss\0",50);
       lcd.print(now.format(buf));
@@ -211,9 +202,16 @@ void loop(void) {
       lcd.print(buf);
       dtostrf(T3Temp, 5, 2, buf);
       lcd.print(buf);
-    }
- 
 
+      //
+
+#ifdef DEBUG
+        // Print log entry to debug console regardless of log trigger state
+        Serial.println(LogEntry);
+#endif
+    
+    }
+    
     delay(50); // 50 ms delay before smashing RTC for another read cycle
   
 
