@@ -14,6 +14,9 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 //
+//   Standard "Amateur Programmer" disclaimer applies.  This code is guaranteed
+//   to be sub-optimal, inconsistent and imperfect.  I will cheerfully refund
+//   your money if you find the code quality to be perfect.
 
 
 #define DEBUG true // Enable serial debug output.
@@ -21,11 +24,6 @@
 // include the SD library:
 #include <SPI.h>
 #include <SD.h>
-
-// set up variables using the SD utility library functions:
-Sd2Card card;
-SdVolume volume;
-SdFile root;
 
 // include the RTC, LCD and wire libraries
 #include <Wire.h>
@@ -45,7 +43,7 @@ SdFile root;
 #define D7_pin  7
 
 // Calibration constants for converting volts to thermometer reading assuming linear equation
-// in the form: TxTemp = TxA * (TxValue * (5.0 / 1024.0)) + TxB
+//  in the form: TxTemp = TxA * (TxValue * (5.0 / 1024.0)) + TxB
 #define T1A 1.0
 #define T1B 0.0
 #define T2A 1.0
@@ -53,10 +51,8 @@ SdFile root;
 #define T3A 1.0
 #define T3B 0.0
 
-
-// The number of seconds between input data readings
-// Also defines file recording and LCD refresh rate
-#define SampleIntervalSeconds 1
+// Filename for logfile
+#define LogFile "datalog.csv"
 
 // Specify constructor for PCF8574 Backpack
 LiquidCrystal_I2C lcd(I2C_ADDR,En_pin,Rw_pin,Rs_pin,D4_pin,D5_pin,D6_pin,D7_pin, Bl_pin, POSITIVE);
@@ -72,26 +68,45 @@ uint8_t thisSecond = 0;
 //SD Card chip select I/O pin
 const int SDchipSelect = 10;
 
-int T1minusPin = A0;    // select the differential low pin for T1
-int T1plusPin = A1;     // select the differential high pin for T1
-int T2Pin = A2;         // select ground referenced analogue T2 pin
-int T3Pin = A3;         // select ground referenced analogue T3 pin
-int PumpPin = 2;        // Digital input pin for AC mains detection module for circulation pump
+int T1minusPin = A0;  // Select the differential low pin for T1
+int T1plusPin = A1;   // Select the differential high pin for T1
+int T2Pin = A2;       // Select ground referenced analogue T2 pin
+int T3Pin = A3;       // Select ground referenced analogue T3 pin
+int PumpPin = 2;      // Digital input pin for AC mains detection module for circulation pump
 int HeatPin = 3;      // Digital input pin for AC mains detection module for heater element
 
+// Raw temperature values from A/D converter
 int T1Value = 0;
 int T2Value = 0;
 int T3Value = 0;
+
+// Pump and heater voltage presence flags
 bool PumpFlag = false;
 bool HeatFlag = false;
 
+// Normalised temperature values after linear function adjustment
 float T1Temp = 0.0;
 float T2Temp = 0.0;
 float T3Temp = 0.0;
 
+// Previous values of all parameters for comparison
+bool LastPumpFlag = false;
+bool LastHeatFlag = false;
 
-char buf[50]; // buffer for print format string
-char TimeStamp[18]; // buffer for current timestamp string
+float LastT1Temp = 0.0;
+float LastT2Temp = 0.0;
+float LastT3Temp = 0.0;
+
+// Minimum delta values for temperatures before triggering a loggable event
+#define DeltaT1Temp 0.02
+#define DeltaT2Temp 0.02
+#define DeltaT3Temp 0.02
+
+bool DeltaFlag = false;  // Flag to indicate an event crossed the logging threshold
+
+
+char buf[24]; // buffer for print format string
+char TimeStamp[24]; // buffer for current timestamp string
 
 String LogEntry = ""; // Log entry string for serial and SD output
 
@@ -122,11 +137,12 @@ void setup() {
   // Success will be signalled in debug mode by the serial console proclaiming
   //  "RTC is NOT running!", followed by the almost correct time being displayed
   //  on the LCD.
+
   
   if (! rtc.isrunning()) {
     
 #ifdef DEBUG
-    Serial.println("RTC is NOT running!");
+    Serial.println("?RTC is NOT running!");
 #endif
 
     // sets the RTC to the date & time this sketch was compiled
@@ -145,36 +161,43 @@ void setup() {
   // Intialise SD card.  See if the card is present and can be initialized:
   if (!SD.begin(SDchipSelect)) {
 #ifdef DEBUG
-    Serial.println("Card failed, or not present");
+    Serial.println("?Card failed or not present");
 #endif
     // don't do anything more:
     return;
   }
 #ifdef DEBUG
-  Serial.println("card initialized.");
+  Serial.println("Card initialized");
 #endif
-  
+
+  // Write startup datetime stamp to SD card
+  DateTime now = rtc.now();
+  strncpy(buf,"YYYY-MM-DD hh:mm:ss\0",24);
+  strncpy(TimeStamp, now.format(buf), 24);
+  LogEntry = "//Init ";
+  LogEntry += TimeStamp;
+  writeLogEntry(LogFile, LogEntry);
     
-}
+} //End setup
 
 
-void loop(void) {
+void loop() {
     DateTime now = rtc.now();
     thisSecond = now.second();
 
-    if (!(lastSecond == thisSecond)) { // Scan inputs and update display once a second
+    if (!(lastSecond == thisSecond)) { // Per second input scan loop
       lastSecond = thisSecond;
 
-      // Read current timestamp
-      strncpy(buf,"YYYYMMDD hhmmss \0",50);
-      strncpy(TimeStamp, now.format(buf), 18);
+      // Format current timestamp into loggable CSV string
+      strncpy(buf,",YYYY-MM-DD hh:mm:ss,\0", 24);
+      strncpy(TimeStamp, now.format(buf), 24);
 
       // read the sensor values:
       T1Value = analogRead(T1plusPin) - analogRead(T1minusPin);
       T2Value = analogRead(T2Pin);
       T3Value = analogRead(T3Pin);
-      PumpFlag = digitalRead(PumpPin);
-      HeatFlag = digitalRead(HeatPin);
+      PumpFlag = !digitalRead(PumpPin);
+      HeatFlag = !digitalRead(HeatPin);
 
       // Convert analog input sensor value to temperature using linear equation constants:
       T1Temp = (T1A * (T1Value * (5.0 / 1024.0 ))) + T1B;
@@ -182,19 +205,19 @@ void loop(void) {
       T3Temp = (T3A * (T3Value * (5.0 / 1024.0 ))) + T3B;
 
       // Pack log entry into string
-      LogEntry = TimeStamp + String(T1Temp) + String(T2Temp) + String(T3Temp)
-                + " " + String(PumpFlag) + " " + String(HeatFlag);
+      LogEntry = TimeStamp + String(T1Temp) + "," + String(T2Temp) + "," + String(T3Temp)
+                + "," + String(PumpFlag) + "," + String(HeatFlag);           
 
       // Format data for LCD and display it
       lcd.setCursor ( 0, 0 );        
-      strncpy(buf,"hh:mm:ss\0",50);
+      strncpy(buf,"hh:mm:ss\0",24);
       lcd.print(now.format(buf));
       if (PumpFlag) {
-        lcd.print(" P:0");
-        } else lcd.print(" P:1");
+        lcd.print(" P1");
+        } else lcd.print(" P0");
       if (HeatFlag) {
-        lcd.print(" H:0");
-        } else lcd.print(" H:1");
+        lcd.print(" H1  ");
+        } else lcd.print(" H0  ");
       lcd.setCursor( 0, 1 );
       dtostrf(T1Temp, 6, 2, buf);
       lcd.print(buf);
@@ -203,16 +226,79 @@ void loop(void) {
       dtostrf(T3Temp, 5, 2, buf);
       lcd.print(buf);
 
-      //
+      DeltaFlag = false;  // Start wih the assumption that there are no loggable events since last poll
+      
 
-#ifdef DEBUG
-        // Print log entry to debug console regardless of log trigger state
-        Serial.println(LogEntry);
-#endif
+      if (PumpFlag | LastPumpFlag) {
+        DeltaFlag = true;
+        LastPumpFlag = PumpFlag;
+      }
+
+      if (HeatFlag | LastHeatFlag) {
+        DeltaFlag = true;
+        LastHeatFlag = HeatFlag;
+      }
+
+      if (abs(T1Temp - LastT1Temp) >= DeltaT1Temp) {
+        DeltaFlag = true;
+        LastT1Temp = T1Temp;
+      }
+      
+      if (abs(T2Temp - LastT2Temp) >= DeltaT2Temp) {
+        DeltaFlag = true;
+        LastT1Temp = T1Temp;
+      }
+
+      if (abs(T3Temp - LastT3Temp) >= DeltaT3Temp) {
+        DeltaFlag = true;
+        LastT1Temp = T1Temp;
+      }
+
+      if (DeltaFlag) {
+        lcd.setCursor ( 15, 0 );
+        lcd.print("*"); // Show loggable event flag on LCD
+        writeLogEntry(LogFile, LogEntry);
+      }
+      
+      
+    } // Per second input scan loop end
+
     
-    }
+
     
-    delay(50); // 50 ms delay before smashing RTC for another read cycle
+  delay(50); // Delay 50 ms before smashing the RTC for another read cycle
   
 
-}
+} //End loop
+
+
+// Appends string passed as stringBuffer to fileName.  Requires SD library
+//  and expects SD card to be initialised with SD.begin(x).
+//
+//  Presence of #define DEBUG will write stringBuffer
+//  to serial out and requires Serial.begin to be called before
+//  invocation.
+//
+void writeLogEntry(String fileName, String printBuffer) {
+
+    File dataFile = SD.open(fileName, FILE_WRITE);
+
+  // if the file is available, write to it:
+  if (dataFile) {
+    dataFile.println(printBuffer);
+    dataFile.close();
+  }
+  else {
+#ifdef DEBUG    
+    // if the file open failed, write error to debug console:
+    Serial.println("?Error opening " + fileName);
+#endif
+  }
+  
+#ifdef DEBUG
+    Serial.println(printBuffer);
+#endif    
+
+  
+} // End writeLogEntry
+

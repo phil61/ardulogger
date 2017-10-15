@@ -1,4 +1,5 @@
 # ardulogger
-Arduino Data Logger
+## Arduino Data Logger
+***
 
-Simple datalogger that passively eavesdrops on a solar hot water controller
+A simple datalogger originally designed to passively eavesdrop on a solar hot water controller.
