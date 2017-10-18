@@ -104,7 +104,6 @@ float LastT3Temp = 0.0;
 
 bool DeltaFlag = false;  // Flag to indicate an event crossed the logging threshold
 
-
 char buf[24]; // buffer for print format string
 char TimeStamp[24]; // buffer for current timestamp string
 
@@ -138,7 +137,6 @@ void setup() {
   //  "RTC is NOT running!", followed by the almost correct time being displayed
   //  on the LCD.
 
-  
   if (! rtc.isrunning()) {
     
 #ifdef DEBUG
@@ -227,7 +225,6 @@ void loop() {
       lcd.print(buf);
 
       DeltaFlag = false;  // Start wih the assumption that there are no loggable events since last poll
-      
 
       if (PumpFlag | LastPumpFlag) {
         DeltaFlag = true;
@@ -260,10 +257,7 @@ void loop() {
         writeLogEntry(LogFile, LogEntry);
       }
       
-      
     } // Per second input scan loop end
-
-    
 
     
   delay(50); // Delay 50 ms before smashing the RTC for another read cycle
@@ -297,8 +291,7 @@ void writeLogEntry(String fileName, String printBuffer) {
   
 #ifdef DEBUG
     Serial.println(printBuffer);
-#endif    
+#endif
 
-  
 } // End writeLogEntry
 
