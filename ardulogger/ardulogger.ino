@@ -243,12 +243,12 @@ void loop() {
       
       if (abs(T2Temp - LastT2Temp) >= DeltaT2Temp) {
         DeltaFlag = true;
-        LastT1Temp = T1Temp;
+        LastT2Temp = T2Temp;
       }
 
       if (abs(T3Temp - LastT3Temp) >= DeltaT3Temp) {
         DeltaFlag = true;
-        LastT1Temp = T1Temp;
+        LastT3Temp = T3Temp;
       }
 
       if (DeltaFlag) {
